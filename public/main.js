@@ -1,9 +1,8 @@
 // Example Game.
-import { game } from "/game.js";
+import { Game } from "./game.js";
 
-// Setup the canvas.
-game.init({
-  fps: 100,
+const game = new Game({
+  fps: 30,
   mount: "game-root",
   width: 640,
   height: 480,
@@ -13,11 +12,14 @@ game.init({
 // Load images from specific directory. /assets/images/~
 const loadImagesPromise = game.loadImages({
   sprites: {
-    player: "eraser.png",
-    enemy: "box.png"
+    carRed: "car-red.png",
+    carPink: "car-pink.png",
+    carYellow: "car-yellow.png",
+    carPurple: "car-purple.png",
+    ball: "ball.png"
   },
   backgrounds: {
-    grid: "grid.png"
+    grid: "field1.png"
   }
 });
 
@@ -44,60 +46,19 @@ game.addText({
 
 loadImagesPromise
   .then(imageLoadResult => {
-    console.log(imageLoadResult);
-
-    game.createEntity({
-      name: "enemy",
-      image: "enemy",
-      xStart: game.width / 2 - 50,
-      yStart: game.height / 2 - 50,
-      width: 100,
-      height: 100,
-      xSpeed: 250,
-      ySpeed: 100,
-      xDir: 1,
-      yDir: -1,
-      visible: true,
-      depth: 10
-    });
-
-    game.createEntity({
-      name: "player",
-      image: "player",
-      xStart: game.width - 110,
-      yStart: game.height - 110,
-      width: 50,
-      height: 80,
-      xSpeed: 0,
-      ySpeed: 0,
-      xDir: 1,
-      yDir: -1,
-      visible: true,
-      depth: 30
-    });
-
     game.score = 0;
 
+    // create entities here.
+    game.createBallEntity("ball", 50, 100, 160, "ball");
+    game.createCarEntity("player", 50, 100, 100, 100, "carPink");
+    game.createCarEntity("enemy", 50, 100, 500, 300, "carYellow");
+
     game.mainGameLoop(() => {
-      const entEnemy = game.entities.enemy;
-      const entPlayer = game.entities.player;
-
-      game.moveEntityBounce(entEnemy);
-      game.moveEntityWithKeys(entPlayer);
-
-      const collided = game.collisionDetectionRectRect(entEnemy, entPlayer);
-
-      if (collided) {
-        game.score++;
-        entEnemy.x = entEnemy.xStart;
-        entEnemy.y = entEnemy.yStart;
-        entEnemy.xDir = Math.random() >= 0.5 ? 1 : -1;
-        entEnemy.yDir = Math.random() >= 0.5 ? 1 : -1;
-        entPlayer.x = entPlayer.xStart;
-        entPlayer.y = entPlayer.yStart;
-        entPlayer.xSpeed = 0;
-        entPlayer.ySpeed = 0;
-      }
+      // move entities and handle collisions
+      game.entities.ball.move();
+      // game.entities.enemy.rotate(0.1); // rotate the enemy car endlessly.
+      game.moveCarWithStupidAI(game.entities.enemy);
+      game.moveEntityWithKeys(game.entities.player);
 
       game.texts.score.text = "Score: " + game.score;
       // show which keys are being pressed.
@@ -109,43 +70,67 @@ loadImagesPromise
     });
   })
   .catch(console.error);
-// Custom functions.
+
+// <><><><><><><><><><><><><><><><><><><><><><><><><><><><><><><><><><><><><><><><>
+//                                Custom functions.
+// <><><><><><><><><><><><><><><><><><><><><><><><><><><><><><><><><><><><><><><><>
 
 // Player moves similar to the game Asteroids.
 game.moveEntityWithKeys = e => {
-  const xAccel = 5;
-  const yAccel = 5;
+  const maxSpeed = 300;
+  const accel = 10;
   const l = game.isKeyPressed("LEFT");
   const r = game.isKeyPressed("RIGHT");
   const u = game.isKeyPressed("UP");
   const d = game.isKeyPressed("DOWN");
-  if (l) {
-    e.xSpeed -= xAccel;
+
+  // !! Arbitrary turning angle. !! FPS will affect turning radius.
+  const maxTurnSpeed = 0.1;
+  // Turning speed decreases as speed decreases, giving the illusion that
+  // the cars' turning is tied to its forward motion.
+  const turnSpeed = maxTurnSpeed * (e.speed / maxSpeed);
+
+  // Key-input change properties.
+  const rev = e.speed < 0 ? -1 : 1;
+  if (l && e.speed != 0) {
+    e.rotate(-turnSpeed * rev);
   }
   if (u) {
-    e.ySpeed -= yAccel;
+    e.speed += accel;
+    if (e.speed < 0) {
+      // add a bit more speed if going forward from reverse.
+      e.speed += accel;
+    }
   }
-  if (r) {
-    e.xSpeed += xAccel;
+  if (r && e.speed != 0) {
+    e.rotate(turnSpeed * rev);
   }
   if (d) {
-    e.ySpeed += yAccel;
+    e.speed -= accel;
+    if (e.speed > 0) {
+      // add a little more power to reverse if still going forward.
+      e.speed -= accel / 2;
+    }
   }
-  // Decrease x/y speed when neither button is held for a given axis.
-  if (!l && !r) {
-    const sp = e.xSpeed;
-    e.xSpeed = sp < 0 ? sp + 1 : sp > 0 ? sp - 1 : sp;
-  }
+
+  // Limit speed.
+  if (e.speed < -maxSpeed) e.speed = -maxSpeed;
+  else if (e.speed > maxSpeed) e.speed = maxSpeed;
+
+  // Decrease speed when neither button is held for a given axis.
   if (!u && !d) {
-    const sp = e.ySpeed;
-    e.ySpeed = sp < 0 ? sp + 1 : sp > 0 ? sp - 1 : sp;
+    const sp = e.speed;
+    e.speed = sp < 0 ? sp + 1 : sp > 0 ? sp - 1 : sp;
   }
-  e.x += e.xSpeed / game.fps;
-  e.y += e.ySpeed / game.fps;
+
+  // Handle interaction with canvas borders (wrap-around).
   if (e.x < -e.width) e.x = game.width;
   if (e.y < -e.height) e.y = game.height;
   if (e.x > game.width) e.x = -e.width;
   if (e.y > game.height) e.y = -e.height;
+
+  // Move the entity.
+  e.move();
 };
 
 // Move the entity around like a pong ball.
@@ -168,4 +153,111 @@ game.moveEntityBounce = e => {
     e.y = -e.y;
     e.yDir *= -1;
   }
+};
+
+// Stupid car AI
+game.moveCarWithStupidAI = e => {
+  const maxSpeed = 300;
+  const accel = 10;
+
+  // represents actual left,right,up,down keys.
+  let l, r, u, d;
+
+  // Logic to fake user input.
+  if (!e.ai) {
+    e.ai = {
+      accelTime: 0,
+      turnTime: 0,
+      keysPressed: { l: false, r: false, u: false, d: false }
+    };
+  }
+
+  if (e.ai.accelTime <= 0) {
+    // randomly set time (in frames) to maintain this button state for movement.
+    e.ai.accelTime = Math.random() > 0.5 ? 30 : 100;
+    // randomly choose a new key state:
+    if (Math.random() > 0.5) {
+      e.ai.keysPressed.u = true;
+      e.ai.keysPressed.d = false;
+    } else {
+      e.ai.keysPressed.d = true;
+      e.ai.keysPressed.u = false;
+    }
+    // 20% chance of no u-d keys pressed.
+    if (Math.random() > 0.8) {
+      e.ai.keysPressed.u = false;
+      e.ai.keysPressed.d = false;
+    }
+  } else e.ai.accelTime--;
+
+  if (e.ai.turnTime <= 0) {
+    // randomly set time (in frames) to maintain this button state for turning.
+    e.ai.turnTime = Math.random() > 0.5 ? 50 : 110;
+    // randomly choose a new key state:
+    if (Math.random() > 0.5) {
+      e.ai.keysPressed.l = true;
+      e.ai.keysPressed.r = false;
+    } else {
+      e.ai.keysPressed.r = true;
+      e.ai.keysPressed.l = false;
+    }
+    // 30% chance of no l-r keys pressed.
+    if (Math.random() > 0.7) {
+      e.ai.keysPressed.r = false;
+      e.ai.keysPressed.l = false;
+    }
+  } else e.ai.turnTime--;
+
+  l = e.ai.keysPressed.l;
+  r = e.ai.keysPressed.r;
+  u = e.ai.keysPressed.u;
+  d = e.ai.keysPressed.d;
+
+  // !! Arbitrary turning angle. !! FPS will affect turning radius.
+  const maxTurnSpeed = 0.1;
+  // Turning speed decreases as speed decreases, giving the illusion that
+  // the cars' turning is tied to its forward motion.
+  const turnSpeed = maxTurnSpeed * (e.speed / maxSpeed);
+
+  // Key-input change properties.
+  const rev = e.speed < 0 ? -1 : 1;
+  if (l && e.speed != 0) {
+    e.rotate(-turnSpeed * rev);
+  }
+  if (u) {
+    e.speed += accel;
+    if (e.speed < 0) {
+      // add a bit more speed if going forward from reverse.
+      e.speed += accel;
+    }
+  }
+  if (r && e.speed != 0) {
+    e.rotate(turnSpeed * rev);
+  }
+  if (d) {
+    e.speed -= accel;
+    if (e.speed > 0) {
+      // add a little more power to reverse if still going forward.
+      e.speed -= accel / 2;
+    }
+  }
+
+  // Limit speed.
+  if (e.speed < -maxSpeed) e.speed = -maxSpeed;
+  else if (e.speed > maxSpeed) e.speed = maxSpeed;
+
+  // Decrease speed when neither button is held for a given axis.
+  if (!u && !d) {
+    const sp = e.speed;
+    e.speed = sp < 0 ? sp + 1 : sp > 0 ? sp - 1 : sp;
+  }
+
+  // Handle interaction with canvas borders (wrap-around).
+  if (e.x < -e.width) e.x = game.width;
+  if (e.y < -e.height) e.y = game.height;
+  if (e.x > game.width) e.x = -e.width;
+  if (e.y > game.height) e.y = -e.height;
+
+  // Move the entity.
+  e.move();
 };
